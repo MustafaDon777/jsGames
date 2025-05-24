@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Games Hub</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #370daa, #003607);
+            min-height: 100vh;
+            font-family: 'Orbitron', 'Inter', 'Gill Sans', sans-serif;
+            overflow-x: hidden;
+            position: relative;
+        }
+        /* Starry background animation */
+        .stars {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: transparent;
+            z-index: -1;
+        }
+        .star {
+            position: absolute;
+            background: #a7f3d0;
+            border-radius: 50%;
+            animation: twinkle 5s infinite alternate;
+        }
+        @keyframes twinkle {
+            0% { opacity: 0.3; transform: scale(0.5); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .game-link {
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(99, 243, 176, 0.5);
+            border: 2px solid #4b2bac;
+            background: #1e1b4b;
+        }
+        .game-link:hover {
+            transform: translateY(-2px) scale(1.03);
+            box-shadow: 0 0 25px rgba(0, 140, 255, 0.8), 0 0 50px rgba(167, 139, 250, 0.5);
+            background: linear-gradient(45deg, #6c3dee, #4aded2);
+            color: #e3f4ff;
+        }
+        h1 {
+            text-shadow: 0 0 20px rgba(167, 139, 250, 0.8);
+            animation: pulse 2s infinite;
+            color: #a7f3d0;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center text-gray-100">
+    <div class="stars">
+        <script>
+            // Generate random stars for background
+            for (let i = 0; i < 100; i++) {
+                const star = document.createElement('div');
+                star.className = 'star';
+                star.style.width = `${Math.random() * 3}px`;
+                star.style.height = star.style.width;
+                star.style.left = `${Math.random() * 100}%`;
+                star.style.top = `${Math.random() * 100}%`;
+                star.style.animationDelay = `${Math.random() * 5}s`;
+                document.querySelector('.stars').appendChild(star);
+            }
+        </script>
+    </div>
+    <div class="container mx-auto px-4 py-12">
+        <h1 class="text-6xl font-bold text-center mb-16">Games Hub</h1>
+        <ul id="games-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            <!-- Game buttons will be inserted here dynamically -->
+        </ul>
+    </div>
+    <script>
+        // List of game HTML files in the 'games' folder
+        const games = [
+            { file: 'snake.html', name: 'Snake' },
+            { file: 'space_invaders.html', name: 'Space Invaders' },
+            { file: 'brick_blaster.html', name: 'Brick Blaster' },
+            { file: 'zuma.html', name: 'Zuma' },
+            { file: 'surfer.html', name: 'Surfer' }
+        ];
+
+        // Get the games list container
+        const gamesList = document.getElementById('games-list');
+
+        // Dynamically create game buttons
+        games.forEach(game => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = `games/${game.file}`;
+            a.className = 'game-link block p-8 rounded-xl text-2xl text-center font-semibold';
+            a.textContent = game.name;
+            li.appendChild(a);
+            gamesList.appendChild(li);
+        });
+    </script>
+</body>
+</html>

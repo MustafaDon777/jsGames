@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Zuma</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #162447;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+        }
+        canvas {
+            border: 2px solid #6b6b6b;
+            max-width: 100%;
+            max-height: 100vh;
+            touch-action: none;
+        }
+        #settings-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            display: none;
+            z-index: 10;
+        }
+        #settings-overlay h2 {
+            margin-top: 0;
+        }
+        #settings-overlay select, #settings-overlay button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #settings-overlay button {
+            background-color: #55ff55;
+            border: none;
+            transition: background-color 0.2s;
+        }
+        #settings-overlay button:hover {
+            background-color: #33cc33;
+        }
+        #settings-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #55ff55;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #settings-button:hover {
+            background-color: #33cc33;
+        }
+        #joystick-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 100px;
+            height: 100px;
+            display: none;
+            touch-action: none;
+        }
+        #joystick-base {
+            width: 100px;
+            height: 100px;
+            background: rgba(100, 100, 100, 0.5);
+            border-radius: 50%;
+            position: relative;
+        }
+        #joystick-knob {
+            width: 50px;
+            height: 50px;
+            background: #55ff55;
+            border-radius: 50%;
+            position: absolute;
+            top: 25px;
+            left: 25px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <button id="settings-button" onclick="toggleSettings()">Settings</button>
+        <div id="settings-overlay">
+            <h2>Game Settings</h2>
+            <p>Control Mode:</p>
+            <select id="control-mode">
+                <option value="mouse">Mouse</option>
+                <option value="keyboard">Keyboard (Arrow Keys)</option>
+                <option value="joystick">Joystick (Touch)</option>
+            </select>
+            <p>Chain Speed:</p>
+            <select id="chain-speed">
+                <option value="0.5">Slow</option>
+                <option value="1">Medium</option>
+                <option value="1.5">Fast</option>
+            </select>
+            <br>
+            <button onclick="closeSettings()">Resume Game</button>
+            <button onclick="resetGame()">Restart Game</button>
+        </div>
+        <div id="joystick-container">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.0/pixi.min.js"></script>
+    <script>
+        // Create PixiJS application
+        const app = new PIXI.Application({
+            width: Math.min(window.innerWidth - 40, 600),
+            height: Math.min(window.innerHeight - 40, 600),
+            backgroundColor: 0x162447,
+            antialias: true
+        });
+        document.getElementById('game-container').appendChild(app.view);
+
+        // Game settings
+        const GRID_SIZE = 16;
+        const CELL_SIZE = app.view.width / GRID_SIZE;
+        const BALL_SIZE = CELL_SIZE / 2;
+        const SHOOTER_POS = { x: app.view.width / 2, y: app.view.height / 2 };
+        const COLORS = [0xff5555, 0x55ff55, 0x5555ff, 0xffff55];
+
+        // Game state
+        let shooterAngle = 0;
+        let chain = [];
+        let projectiles = [];
+        let nextBallColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+        let gameOver = false;
+        let score = 0;
+        let controlMode = 'mouse';
+        let keyboardInput = { x: 0, y: 0 };
+        let joystickInput = { x: 0, y: 0 };
+        let gamePaused = false;
+        let chainSpeed = 0.5;
+
+        // Create containers
+        const gameContainer = document.getElementById('game-container');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const joystickContainer = document.getElementById('joystick-container');
+
+        // Create shooter
+        const shooterSprite = new PIXI.Graphics();
+        shooterSprite.beginFill(0xaaaaaa);
+        shooterSprite.drawRect(-10, -30, 20, 30);
+        shooterSprite.endFill();
+        shooterSprite.beginFill(nextBallColor);
+        shooterSprite.drawCircle(0, -15, BALL_SIZE / 2);
+        shooterSprite.endFill();
+        shooterSprite.position.set(SHOOTER_POS.x, SHOOTER_POS.y);
+        app.stage.addChild(shooterSprite);
+
+        // Create chain container
+        const chainContainer = new PIXI.Container();
+        app.stage.addChild(chainContainer);
+
+        // Define path (simple spiral for simplicity)
+        const path = [];
+        const radius = app.view.width / 4;
+        for (let t = 0; t < 10; t += 0.1) {
+            const x = SHOOTER_POS.x + radius * Math.cos(t) * (1 - t / 20);
+            const y = SHOOTER_POS.y + radius * Math.sin(t) * (1 - t / 20);
+            path.push({ x, y });
+        }
+
+        // Spawn chain
+        function spawnChain() {
+            chainContainer.removeChildren();
+            chain = [];
+            for (let i = 0; i < 20; i++) {
+                const pos = path[i];
+                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                const ball = new PIXI.Graphics();
+                ball.beginFill(color);
+                ball.drawCircle(0, 0, BALL_SIZE / 2);
+                ball.endFill();
+                ball.position.set(pos.x, pos.y);
+                chainContainer.addChild(ball);
+                chain.push({ x: pos.x, y: pos.y, color, sprite: ball, pathIndex: i });
+            }
+        }
+
+        // Score display
+        const scoreText = new PIXI.Text('Score: 0', {
+            fontFamily: 'Arial',
+            fontSize: 24,
+            fill: 0xffffff,
+            align: 'left'
+        });
+        scoreText.position.set(10, 10);
+        app.stage.addChild(scoreText);
+
+        // Game over/win text
+        const statusText = new PIXI.Text('', {
+            fontFamily: 'Arial',
+            fontSize: 36,
+            fill: 0xff5555,
+            align: 'center'
+        });
+        statusText.position.set(app.view.width / 2, app.view.height / 2);
+        statusText.anchor.set(0.5);
+        statusText.visible = false;
+        app.stage.addChild(statusText);
+
+        // Settings functions
+        function toggleSettings() {
+            gamePaused = true;
+            settingsOverlay.style.display = 'block';
+            joystickContainer.style.display = 'none';
+        }
+
+        function closeSettings() {
+            controlMode = document.getElementById('control-mode').value;
+            chainSpeed = parseFloat(document.getElementById('chain-speed').value);
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' && !gameOver ? 'block' : 'none';
+            gamePaused = false;
+        }
+
+        // Input handling
+        let mousePosition = { x: SHOOTER_POS.x, y: SHOOTER_POS.y };
+        app.view.addEventListener('mousemove', (e) => {
+            if (controlMode === 'mouse' && !gamePaused && !gameOver) {
+                const rect = app.view.getBoundingClientRect();
+                mousePosition.x = e.clientX - rect.left;
+                mousePosition.y = e.clientY - rect.top;
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'r' || e.key === 'R') {
+                resetGame();
+            } else if (e.key === 's' || e.key === 'S') {
+                toggleSettings();
+            } else if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowLeft':
+                        keyboardInput.x = -1;
+                        break;
+                    case 'ArrowRight':
+                        keyboardInput.x = 1;
+                        break;
+                    case ' ':
+                        shootBall();
+                        break;
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowLeft':
+                    case 'ArrowRight':
+                        keyboardInput.x = 0;
+                        break;
+                }
+            }
+        });
+
+        let isDragging = false;
+        let joystickCenter = { x: 0, y: 0 };
+        const joystickRadius = 50;
+        const joystickKnob = document.getElementById('joystick-knob');
+
+        function handleTouch(event, isStart) {
+            if (controlMode !== 'joystick' || gamePaused || gameOver) return;
+            event.preventDefault();
+            const touch = event.type === 'touchstart' || event.type === 'touchmove' ? event.touches[0] : null;
+            if (!touch && !isStart) return;
+
+            if (isStart) {
+                isDragging = true;
+                joystickCenter.x = touch.clientX;
+                joystickCenter.y = touch.clientY;
+                joystickContainer.style.left = `${touch.clientX - joystickRadius}px`;
+                joystickContainer.style.top = `${touch.clientY - joystickRadius}px`;
+                joystickContainer.style.display = 'block';
+            }
+
+            if (isDragging) {
+                const dx = touch ? touch.clientX - joystickCenter.x : 0;
+                const dy = touch ? touch.clientY - joystickCenter.y : 0;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const maxDistance = joystickRadius / 2;
+
+                if (distance > maxDistance) {
+                    dx = (dx / distance) * maxDistance;
+                    dy = (dy / distance) * maxDistance;
+                }
+
+                joystickKnob.style.left = `${25 + dx}px`;
+                joystickKnob.style.top = `${25 + dy}px`;
+                joystickInput.x = dx / maxDistance;
+                joystickInput.y = dy / maxDistance;
+
+                if (distance > maxDistance / 2) {
+                    shootBall();
+                }
+            }
+
+            if (!isStart) {
+                isDragging = false;
+                joystickContainer.style.display = 'none';
+                joystickKnob.style.left = '25px';
+                joystickKnob.style.top = '25px';
+                joystickInput = { x: 0, y: 0 };
+            }
+        }
+
+        document.addEventListener('touchstart', (e) => handleTouch(e, true));
+        document.addEventListener('touchmove', (e) => handleTouch(e, true));
+        document.addEventListener('touchend', (e) => handleTouch(e, false));
+
+        // Shoot ball
+        function shootBall() {
+            const angle = shooterAngle;
+            const ball = new PIXI.Graphics();
+            ball.beginFill(nextBallColor);
+            ball.drawCircle(0, 0, BALL_SIZE / 2);
+            ball.endFill();
+            ball.position.set(SHOOTER_POS.x, SHOOTER_POS.y);
+            app.stage.addChild(ball);
+            projectiles.push({ x: ball.x, y: ball.y, vx: Math.cos(angle) * 5, vy: Math.sin(angle) * 5, color: nextBallColor, sprite: ball });
+            nextBallColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+            updateShooter();
+        }
+
+        // Update shooter graphics
+        function updateShooter() {
+            shooterSprite.clear();
+            shooterSprite.beginFill(0xaaaaaa);
+            shooterSprite.drawRect(-10, -30, 20, 30);
+            shooterSprite.endFill();
+            shooterSprite.beginFill(nextBallColor);
+            shooterSprite.drawCircle(0, -15, BALL_SIZE / 2);
+            shooterSprite.endFill();
+            shooterSprite.rotation = shooterAngle;
+        }
+
+        // Reset game
+        function resetGame() {
+            shooterAngle = 0;
+            chainContainer.removeChildren();
+            projectiles.forEach(p => p.sprite.destroy());
+            chain = [];
+            projectiles = [];
+            score = 0;
+            gameOver = false;
+            gamePaused = false;
+            statusText.visible = false;
+            scoreText.text = `Score: ${score}`;
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' ? 'block' : 'none';
+            spawnChain();
+            updateShooter();
+        }
+
+        // Game loop
+        app.ticker.add((delta) => {
+            if (gameOver || gamePaused) return;
+
+            // Update shooter angle
+            if (controlMode === 'mouse') {
+                shooterAngle = Math.atan2(mousePosition.y - SHOOTER_POS.y, mousePosition.x - SHOOTER_POS.x);
+            } else if (controlMode === 'keyboard') {
+                shooterAngle += keyboardInput.x * 0.05 * delta;
+            } else if (controlMode === 'joystick') {
+                if (Math.abs(joystickInput.x) > 0.2 || Math.abs(joystickInput.y) > 0.2) {
+                    shooterAngle = Math.atan2(joystickInput.y, joystickInput.x);
+                }
+            }
+            updateShooter();
+
+            // Move chain
+            chain.forEach(ball => {
+                ball.pathIndex += chainSpeed * delta / 10;
+                if (ball.pathIndex >= path.length) {
+                    gameOver = true;
+                    statusText.text = 'Game Over!\nPress R to Restart\nPress S for Settings';
+                    statusText.visible = true;
+                    joystickContainer.style.display = 'none';
+                    return;
+                }
+                const pos = path[Math.floor(ball.pathIndex)];
+                ball.x = pos.x;
+                ball.y = pos.y;
+                ball.sprite.position.set(ball.x, ball.y);
+            });
+
+            // Move projectiles
+            projectiles = projectiles.filter(p => {
+                p.x += p.vx * delta;
+                p.y += p.vy * delta;
+                p.sprite.position.set(p.x, p.y);
+                if (p.x < 0 || p.x > app.view.width || p.y < 0 || p.y > app.view.height) {
+                    p.sprite.destroy();
+                    return false;
+                }
+                return true;
+            });
+
+            // Collision detection
+            projectiles = projectiles.filter(p => {
+                for (let i = 0; i < chain.length; i++) {
+                    const ball = chain[i];
+                    if (Math.sqrt((p.x - ball.x) ** 2 + (p.y - ball.y) ** 2) < BALL_SIZE) {
+                        if (p.color === ball.color) {
+                            let start = i, end = i;
+                            while (start > 0 && chain[start - 1].color === p.color) start--;
+                            while (end < chain.length - 1 && chain[end + 1].color === p.color) end++;
+                            if (end - start + 1 >= 3) {
+                                for (let j = start; j <= end; j++) {
+                                    chain[j].sprite.destroy();
+                                }
+                                chain.splice(start, end - start + 1);
+                                score += (end - start + 1) * 10;
+                                scoreText.text = `Score: ${score}`;
+                            } else {
+                                chain.splice(i, 0, { x: p.x, y: p.y, color: p.color, sprite: p.sprite, pathIndex: ball.pathIndex });
+                            }
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
+
+            if (chain.length === 0) {
+                gameOver = true;
+                statusText.text = 'You Win!\nPress R to Restart\nPress S for Settings';
+                statusText.visible = true;
+                joystickContainer.style.display = 'none';
+            }
+        });
+
+        // Initial setup
+        spawnChain();
+
+        // Resize canvas
+        window.addEventListener('resize', () => {
+            if (gamePaused || gameOver) return;
+            app.renderer.resize(Math.min(window.innerWidth - 40, 600), Math.min(window.innerHeight - 40, 600));
+            SHOOTER_POS.x = app.view.width / 2;
+            SHOOTER_POS.y = app.view.height / 2;
+            shooterSprite.position.set(SHOOTER_POS.x, SHOOTER_POS.y);
+            statusText.position.set(app.view.width / 2, app.view.height / 2);
+            scoreText.position.set(10, 10);
+        });
+    </script>
+</body>
+</html>

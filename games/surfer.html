@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>surfer : a Subway surfer inspired game</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #3a3a3a;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+        }
+        canvas {
+            border: 2px solid #6b6b6b;
+            max-width: 100%;
+            max-height: 100vh;
+            touch-action: none;
+        }
+        #settings-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            display: none;
+            z-index: 10;
+        }
+        #settings-overlay h2 {
+            margin-top: 0;
+        }
+        #settings-overlay select, #settings-overlay button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #settings-overlay button {
+            background-color: #55ff55;
+            border: none;
+            transition: background-color 0.2s;
+        }
+        #settings-overlay button:hover {
+            background-color: #33cc33;
+        }
+        #settings-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #55ff55;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #settings-button:hover {
+            background-color: #33cc33;
+        }
+        #joystick-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 100px;
+            height: 100px;
+            display: none;
+            touch-action: none;
+        }
+        #joystick-base {
+            width: 100px;
+            height: 100px;
+            background: rgba(100, 100, 100, 0.5);
+            border-radius: 50%;
+            position: relative;
+        }
+        #joystick-knob {
+            width: 50px;
+            height: 50px;
+            background: #55ff55;
+            border-radius: 50%;
+            position: absolute;
+            top: 25px;
+            left: 25px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <button id="settings-button" onclick="toggleSettings()">Settings</button>
+        <div id="settings-overlay">
+            <h2>Game Settings</h2>
+            <p>Control Mode:</p>
+            <select id="control-mode">
+                <option value="mouse">Mouse</option>
+                <option value="keyboard">Keyboard (Arrow Keys)</option>
+                <option value="joystick">Joystick (Touch)</option>
+            </select>
+            <p>Game Speed:</p>
+            <select id="game-speed">
+                <option value="1">Slow</option>
+                <option value="1.5">Medium</option>
+                <option value="2">Fast</option>
+            </select>
+            <br>
+            <button onclick="closeSettings()">Resume Game</button>
+            <button onclick="resetGame()">Restart Game</button>
+        </div>
+        <div id="joystick-container">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.0/pixi.min.js"></script>
+    <script>
+        // Create PixiJS application
+        const app = new PIXI.Application({
+            width: Math.min(window.innerWidth - 40, 600),
+            height: Math.min(window.innerHeight - 40, 600),
+            backgroundColor: 0x3a3a3a,
+            antialias: true
+        });
+        document.getElementById('game-container').appendChild(app.view);
+
+        // Game settings
+        const GRID_SIZE = 16;
+        const CELL_SIZE = app.view.width / GRID_SIZE;
+        const PLAYER_SIZE = CELL_SIZE;
+        const PLAYER_SPEED = 5;
+        const ROAD_WIDTH = app.view.width / 3;
+        const LANES = [app.view.width / 6, app.view.width / 2, app.view.width * 5 / 6];
+
+        // Game state
+        let player = { x: app.view.width / 2, y: app.view.height - 50 };
+        let velocity = { x: 0, y: 0 };
+        let targetDirection = { x: 0, y: 0 };
+        let obstacles = [];
+        let coins = [];
+        let npcs = [];
+        let gameOver = false;
+        let score = 0;
+        let controlMode = 'mouse';
+        let keyboardInput = { x: 0, y: 0 };
+        let joystickInput = { x: 0, y: 0 };
+        let gamePaused = false;
+        let gameSpeed = 1;
+
+        // Create containers
+        const gameContainer = document.getElementById('game-container');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const joystickContainer = document.getElementById('joystick-container');
+
+        // Create road
+        const roadSprite = new PIXI.Graphics();
+        roadSprite.beginFill(0x666666);
+        roadSprite.drawRect(app.view.width / 3, 0, ROAD_WIDTH, app.view.height);
+        roadSprite.endFill();
+        app.stage.addChild(roadSprite);
+
+        // Create player
+        const playerSprite = new PIXI.Graphics();
+        playerSprite.beginFill(0x55ff55);
+        playerSprite.drawCircle(0, 0, PLAYER_SIZE / 2);
+        playerSprite.endFill();
+        playerSprite.position.set(player.x, player.y);
+        app.stage.addChild(playerSprite);
+
+        // Create obstacle and coin containers
+        const obstacleContainer = new PIXI.Container();
+        const coinContainer = new PIXI.Container();
+        const npcContainer = new PIXI.Container();
+        app.stage.addChild(obstacleContainer);
+        app.stage.addChild(coinContainer);
+        app.stage.addChild(npcContainer);
+
+        // Spawn obstacles and coins
+        function spawnObstaclesAndCoins() {
+            if (Math.random() < 0.02) {
+                const lane = LANES[Math.floor(Math.random() * 3)];
+                const obstacle = new PIXI.Graphics();
+                obstacle.beginFill(0xff5555);
+                obstacle.drawRect(-CELL_SIZE / 2, 0, CELL_SIZE, CELL_SIZE);
+                obstacle.endFill();
+                obstacle.position.set(lane, -CELL_SIZE);
+                obstacleContainer.addChild(obstacle);
+                obstacles.push({ x: lane, y: -CELL_SIZE, sprite: obstacle });
+            }
+            if (Math.random() < 0.01) {
+                const lane = LANES[Math.floor(Math.random() * 3)];
+                const coin = new PIXI.Graphics();
+                coin.beginFill(0xffff55);
+                coin.drawCircle(0, 0, CELL_SIZE / 4);
+                coin.endFill();
+                coin.position.set(lane, -CELL_SIZE);
+                coinContainer.addChild(coin);
+                coins.push({ x: lane, y: -CELL_SIZE, sprite: coin });
+            }
+            if (Math.random() < 0.005) {
+                const lane = LANES[Math.floor(Math.random() * 3)];
+                const npc = new PIXI.Graphics();
+                npc.beginFill(0x5555ff);
+                npc.drawRect(-CELL_SIZE / 2, 0, CELL_SIZE, CELL_SIZE);
+                npc.endFill();
+                npc.position.set(lane, -CELL_SIZE);
+                npcContainer.addChild(npc);
+                npcs.push({ x: lane, y: -CELL_SIZE, sprite: npc });
+            }
+        }
+
+        // Score display
+        const scoreText = new PIXI.Text('Score: 0', {
+            fontFamily: 'Arial',
+            fontSize: 24,
+            fill: 0xffffff,
+            align: 'left'
+        });
+        scoreText.position.set(10, 10);
+        app.stage.addChild(scoreText);
+
+        // Game over/win text
+        const statusText = new PIXI.Text('', {
+            fontFamily: 'Arial',
+            fontSize: 36,
+            fill: 0xff5555,
+            align: 'center'
+        });
+        statusText.position.set(app.view.width / 2, app.view.height / 2);
+        statusText.anchor.set(0.5);
+        statusText.visible = false;
+        app.stage.addChild(statusText);
+
+        // Settings functions
+        function toggleSettings() {
+            gamePaused = true;
+            settingsOverlay.style.display = 'block';
+            joystickContainer.style.display = 'none';
+        }
+
+        function closeSettings() {
+            controlMode = document.getElementById('control-mode').value;
+            gameSpeed = parseFloat(document.getElementById('game-speed').value);
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' && !gameOver ? 'block' : 'none';
+            gamePaused = false;
+        }
+
+        // Input handling
+        let mousePosition = { x: player.x, y: player.y };
+        app.view.addEventListener('mousemove', (e) => {
+            if (controlMode === 'mouse' && !gamePaused && !gameOver) {
+                const rect = app.view.getBoundingClientRect();
+                mousePosition.x = e.clientX - rect.left;
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'r' || e.key === 'R') {
+                resetGame();
+            } else if (e.key === 's' || e.key === 'S') {
+                toggleSettings();
+            } else if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowLeft':
+                        keyboardInput.x = -1;
+                        break;
+                    case 'ArrowRight':
+                        keyboardInput.x = 1;
+                        break;
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowLeft':
+                    case 'ArrowRight':
+                        keyboardInput.x = 0;
+                        break;
+                }
+            }
+        });
+
+        let isDragging = false;
+        let joystickCenter = { x: 0, y: 0 };
+        const joystickRadius = 50;
+        const joystickKnob = document.getElementById('joystick-knob');
+
+        function handleTouch(event, isStart) {
+            if (controlMode !== 'joystick' || gamePaused || gameOver) return;
+            event.preventDefault();
+            const touch = event.type === 'touchstart' || event.type === 'touchmove' ? event.touches[0] : null;
+            if (!touch && !isStart) return;
+
+            if (isStart) {
+                isDragging = true;
+                joystickCenter.x = touch.clientX;
+                joystickCenter.y = touch.clientY;
+                joystickContainer.style.left = `${touch.clientX - joystickRadius}px`;
+                joystickContainer.style.top = `${touch.clientY - joystickRadius}px`;
+                joystickContainer.style.display = 'block';
+            }
+
+            if (isDragging) {
+                const dx = touch ? touch.clientX - joystickCenter.x : 0;
+                const dy = touch ? touch.clientY - joystickCenter.y : 0;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const maxDistance = joystickRadius / 2;
+
+                if (distance > maxDistance) {
+                    dx = (dx / distance) * maxDistance;
+                    dy = (dy / distance) * maxDistance;
+                }
+
+                joystickKnob.style.left = `${25 + dx}px`;
+                joystickKnob.style.top = `${25 + dy}px`;
+                joystickInput.x = dx / maxDistance;
+                joystickInput.y = dy / maxDistance;
+            }
+
+            if (!isStart) {
+                isDragging = false;
+                joystickContainer.style.display = 'none';
+                joystickKnob.style.left = '25px';
+                joystickKnob.style.top = '25px';
+                joystickInput = { x: 0, y: 0 };
+            }
+        }
+
+        document.addEventListener('touchstart', (e) => handleTouch(e, true));
+        document.addEventListener('touchmove', (e) => handleTouch(e, true));
+        document.addEventListener('touchend', (e) => handleTouch(e, false));
+
+        // Reset game
+        function resetGame() {
+            player = { x: app.view.width / 2, y: app.view.height - 50 };
+            velocity = { x: 0, y: 0 };
+            targetDirection = { x: 0, y: 0 };
+            keyboardInput = { x: 0, y: 0 };
+            joystickInput = { x: 0, y: 0 };
+            obstacles.forEach(o => o.sprite.destroy());
+            coins.forEach(c => c.sprite.destroy());
+            npcs.forEach(n => n.sprite.destroy());
+            obstacles = [];
+            coins = [];
+            npcs = [];
+            score = 0;
+            gameOver = false;
+            gamePaused = false;
+            statusText.visible = false;
+            scoreText.text = `Score: ${score}`;
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' ? 'block' : 'none';
+            playerSprite.position.set(player.x, player.y);
+        }
+
+        // Game loop
+        app.ticker.add((delta) => {
+            if (gameOver || gamePaused) return;
+
+            // Player movement
+            if (controlMode === 'mouse') {
+                const dx = mousePosition.x - player.x;
+                targetDirection.x = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+            } else if (controlMode === 'keyboard') {
+                targetDirection.x = keyboardInput.x;
+            } else if (controlMode === 'joystick') {
+                targetDirection.x = joystickInput.x;
+            }
+
+            velocity.x = targetDirection.x * PLAYER_SPEED;
+            player.x += velocity.x * delta;
+            if (player.x < app.view.width / 3 + PLAYER_SIZE / 2) player.x = app.view.width / 3 + PLAYER_SIZE / 2;
+            if (player.x > app.view.width * 2 / 3 - PLAYER_SIZE / 2) player.x = app.view.width * 2 / 3 - PLAYER_SIZE / 2;
+            playerSprite.position.set(player.x, player.y);
+
+            // Spawn and move obstacles/coins/npcs
+            spawnObstaclesAndCoins();
+            obstacles = obstacles.filter(o => {
+                o.y += gameSpeed * 2 * delta;
+                o.sprite.position.set(o.x, o.y);
+                if (o.y > app.view.height) {
+                    o.sprite.destroy();
+                    return false;
+                }
+                if (Math.abs(o.x - player.x) < PLAYER_SIZE / 2 && Math.abs(o.y - player.y) < PLAYER_SIZE / 2) {
+                    gameOver = true;
+                    statusText.text = 'Game Over!\nPress R to Restart\nPress S for Settings';
+                    statusText.visible = true;
+                    joystickContainer.style.display = 'none';
+                    return false;
+                }
+                return true;
+            });
+
+            coins = coins.filter(c => {
+                c.y += gameSpeed * 2 * delta;
+                c.sprite.position.set(c.x, c.y);
+                if (c.y > app.view.height) {
+                    c.sprite.destroy();
+                    return false;
+                }
+                if (Math.abs(c.x - player.x) < PLAYER_SIZE / 2 && Math.abs(c.y - player.y) < PLAYER_SIZE / 2) {
+                    c.sprite.destroy();
+                    score += 10;
+                    scoreText.text = `Score: ${score}`;
+                    return false;
+                }
+                return true;
+            });
+
+            npcs = npcs.filter(n => {
+                n.y += gameSpeed * 1.5 * delta;
+                n.sprite.position.set(n.x, n.y);
+                if (n.y > app.view.height) {
+                    n.sprite.destroy();
+                    return false;
+                }
+                return true;
+            });
+
+            score += delta / 60; // Score increases over time
+            scoreText.text = `Score: ${Math.floor(score)}`;
+        });
+
+        // Resize canvas
+        window.addEventListener('resize', () => {
+            if (gamePaused || gameOver) return;
+            app.renderer.resize(Math.min(window.innerWidth - 40, 600), Math.min(window.innerHeight - 40, 600));
+            player.y = app.view.height - 50;
+            playerSprite.position.set(player.x, player.y);
+            roadSprite.clear();
+            roadSprite.beginFill(0x666666);
+            roadSprite.drawRect(app.view.width / 3, 0, app.view.width / 3, app.view.height);
+            roadSprite.endFill();
+            statusText.position.set(app.view.width / 2, app.view.height / 2);
+            scoreText.position.set(10, 10);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Snake Game with PixiJS</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #2c2c2c;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+        }
+        canvas {
+            border: 2px solid #6b6b6b;
+            max-width: 100%;
+            max-height: 100vh;
+            touch-action: none;
+        }
+        #settings-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            display: none;
+            z-index: 10;
+        }
+        #settings-overlay h2 {
+            margin-top: 0;
+        }
+        #settings-overlay select, #settings-overlay button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #settings-overlay button {
+            background-color: #55ff55;
+            border: none;
+            transition: background-color 0.2s;
+        }
+        #settings-overlay button:hover {
+            background-color: #33cc33;
+        }
+        #settings-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #55ff55;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #settings-button:hover {
+            background-color: #33cc33;
+        }
+        #joystick-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 100px;
+            height: 100px;
+            display: none;
+            touch-action: none;
+        }
+        #joystick-base {
+            width: 100px;
+            height: 100px;
+            background: rgba(100, 100, 100, 0.5);
+            border-radius: 50%;
+            position: relative;
+        }
+        #joystick-knob {
+            width: 50px;
+            height: 50px;
+            background: #55ff55;
+            border-radius: 50%;
+            position: absolute;
+            top: 25px;
+            left: 25px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <button id="settings-button" onclick="toggleSettings()">Settings</button>
+        <div id="settings-overlay">
+            <h2>Game Settings</h2>
+            <p>Control Mode:</p>
+            <select id="control-mode">
+                <option value="mouse">Mouse</option>
+                <option value="keyboard">Keyboard (Arrow Keys)</option>
+                <option value="joystick">Joystick (Touch)</option>
+            </select>
+            <p>Winning Score:</p>
+            <select id="win-score">
+                <option value="50">50 Fruits</option>
+                <option value="100">100 Fruits</option>
+                <option value="200">200 Fruits</option>
+            </select>
+            <br>
+            <button onclick="closeSettings()">Resume Game</button>
+            <button onclick="resetGame()">Restart Game</button>
+        </div>
+        <div id="joystick-container">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.0/pixi.min.js"></script>
+    <script>
+        // Create PixiJS application
+        const app = new PIXI.Application({
+            width: Math.min(window.innerWidth - 40, 600),
+            height: Math.min(window.innerHeight - 40, 600),
+            backgroundColor: 0x444444,
+            antialias: true
+        });
+        document.getElementById('game-container').appendChild(app.view);
+
+        // Game settings
+        const GRID_SIZE = 16;
+        const CELL_SIZE = app.view.width / GRID_SIZE;
+        const HEX_HEIGHT = CELL_SIZE * Math.sqrt(3) / 2;
+        const SNAKE_SPEED = 3;
+        const SNAKE_SEGMENT_SPACING = 20;
+        const MAX_SEGMENTS = 100;
+        const TURN_SPEED = 0.3;
+
+        // Game state
+        let snake = [{ x: app.view.width / 2, y: app.view.height / 2 }];
+        let velocity = { x: 0, y: 0 };
+        let targetDirection = { x: 0, y: 0 };
+        let food = { x: 5, y: 5 };
+        let gameOver = false;
+        let winScore = 5;
+        let score = 0;
+        let controlMode = 'mouse';
+        let keyboardInput = { x: 0, y: 0 };
+        let joystickInput = { x: 0, y: 0 };
+        let gamePaused = false;
+
+        // Create containers
+        const gameContainer = document.getElementById('game-container');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const joystickContainer = document.getElementById('joystick-container');
+
+        // Create hexagonal grid with square mechanics
+        const grid = new PIXI.Graphics();
+        grid.lineStyle(1, 0x666666);
+        for (let row = 0; row < GRID_SIZE*2.5; row++) {
+            for (let col = 0; col < GRID_SIZE; col++) {
+                const x = col * CELL_SIZE * 1.5 + (row % 2) * CELL_SIZE * 0.75;
+                const y = row * HEX_HEIGHT;
+                drawHexagon(grid, -15 + x + CELL_SIZE / 2, 0.5* y + HEX_HEIGHT / 2, CELL_SIZE / 2);
+            }
+        }
+        app.stage.addChild(grid);
+
+        // Create snake container
+        const snakeContainer = new PIXI.Container();
+        app.stage.addChild(snakeContainer);
+
+        // Create food (circular fruit)
+        const foodSprite = new PIXI.Graphics();
+        foodSprite.beginFill(0xff5555);
+        foodSprite.drawCircle(0, 0, CELL_SIZE / 2 - 2);
+        foodSprite.endFill();
+        foodSprite.filters = [new PIXI.filters.BlurFilter(5)];
+        app.stage.addChild(foodSprite);
+
+        // Score and win condition display
+        const scoreText = new PIXI.Text('Score: 0 / 5', {
+            fontFamily: 'Arial',
+            fontSize: 24,
+            fill: 0xffffff,
+            align: 'left'
+        });
+        scoreText.position.set(10, 10);
+        app.stage.addChild(scoreText);
+
+        // Game over/win text
+        const statusText = new PIXI.Text('', {
+            fontFamily: 'Arial',
+            fontSize: 36,
+            fill: 0xff5555,
+            align: 'center'
+        });
+        statusText.position.set(app.view.width / 2, app.view.height / 2);
+        statusText.anchor.set(0.5);
+        statusText.visible = false;
+        app.stage.addChild(statusText);
+
+        // Draw hexagon helper
+        function drawHexagon(graphics, x, y, radius) {
+            graphics.moveTo(x + radius, y);
+            for (let i = 1; i <= 6; i++) {
+                const angle = (Math.PI / 3) * i;
+                graphics.lineTo(
+                    x + radius * Math.cos(angle),
+                    y + radius * Math.sin(angle)
+                );
+            }
+            graphics.closePath();
+        }
+
+        // Settings functions
+        function toggleSettings() {
+            gamePaused = true;
+            settingsOverlay.style.display = 'block';
+            joystickContainer.style.display = 'none';
+        }
+
+        function closeSettings() {
+            controlMode = document.getElementById('control-mode').value;
+            winScore = parseInt(document.getElementById('win-score').value);
+            scoreText.text = `Score: ${score} / ${winScore}`;
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' && !gameOver ? 'block' : 'none';
+            gamePaused = false;
+        }
+
+        // Mouse input
+        let mousePosition = { x: app.view.width / 2, y: app.view.height / 2 };
+        app.view.addEventListener('mousemove', (e) => {
+            if (controlMode === 'mouse' && !gamePaused && !gameOver) {
+                const rect = app.view.getBoundingClientRect();
+                mousePosition.x = e.clientX - rect.left;
+                mousePosition.y = e.clientY - rect.top;
+            }
+        });
+
+        // Keyboard input
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'r' || e.key === 'R') {
+                resetGame();
+            } else if (e.key === 's' || e.key === 'S') {
+                toggleSettings();
+            } else if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowUp':
+                        keyboardInput.y = -1;
+                        keyboardInput.x = 0;
+                        break;
+                    case 'ArrowDown':
+                        keyboardInput.y = 1;
+                        keyboardInput.x = 0;
+                        break;
+                    case 'ArrowLeft':
+                        keyboardInput.x = -1;
+                        keyboardInput.y = 0;
+                        break;
+                    case 'ArrowRight':
+                        keyboardInput.x = 1;
+                        keyboardInput.y = 0;
+                        break;
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (controlMode === 'keyboard' && !gamePaused && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowUp':
+                    case 'ArrowDown':
+                        keyboardInput.y = 0;
+                        break;
+                    case 'ArrowLeft':
+                    case 'ArrowRight':
+                        keyboardInput.x = 0;
+                        break;
+                }
+            }
+        });
+
+        // Joystick input (viewport-wide)
+        let isDragging = false;
+        let joystickCenter = { x: 0, y: 0 };
+        const joystickRadius = 50;
+
+        function handleTouch(event, isStart) {
+            if (controlMode !== 'joystick' || gamePaused || gameOver) return;
+            event.preventDefault();
+            const touch = event.type === 'touchstart' || event.type === 'touchmove' ? event.touches[0] : null;
+            if (!touch && !isStart) return;
+
+            if (isStart) {
+                isDragging = true;
+                joystickCenter.x = touch.clientX;
+                joystickCenter.y = touch.clientY;
+                joystickContainer.style.left = `${touch.clientX - joystickRadius}px`;
+                joystickContainer.style.top = `${touch.clientY - joystickRadius}px`;
+                joystickContainer.style.display = 'block';
+            }
+
+            if (isDragging) {
+                const dx = touch ? touch.clientX - joystickCenter.x : 0;
+                const dy = touch ? touch.clientY - joystickCenter.y : 0;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const maxDistance = joystickRadius / 2;
+
+                if (distance > maxDistance) {
+                    dx = (dx / distance) * maxDistance;
+                    dy = (dy / distance) * maxDistance;
+                }
+
+                joystickKnob.style.left = `${25 + dx}px`;
+                joystickKnob.style.top = `${25 + dy}px`;
+                joystickInput.x = dx / maxDistance;
+                joystickInput.y = dy / maxDistance;
+            }
+
+            if (!isStart) {
+                isDragging = false;
+                joystickContainer.style.display = 'none';
+                joystickKnob.style.left = '25px';
+                joystickKnob.style.top = '25px';
+                joystickInput = { x: 0, y: 0 };
+            }
+        }
+
+        document.addEventListener('touchstart', (e) => handleTouch(e, true));
+        document.addEventListener('touchmove', (e) => handleTouch(e, true));
+        document.addEventListener('touchend', (e) => handleTouch(e, false));
+
+        // Reset game
+        function resetGame() {
+            snake = [{ x: app.view.width / 2, y: app.view.height / 2 }];
+            velocity = { x: 0, y: 0 };
+            targetDirection = { x: 0, y: 0 };
+            keyboardInput = { x: 0, y: 0 };
+            joystickInput = { x: 0, y: 0 };
+            score = 0;
+            gameOver = false;
+            gamePaused = false;
+            statusText.visible = false;
+            scoreText.text = `Score: ${score} / ${winScore}`;
+            settingsOverlay.style.display = 'none';
+            joystickContainer.style.display = controlMode === 'joystick' ? 'block' : 'none';
+            snakeContainer.removeChildren();
+            spawnFood();
+            updateSnakeGraphics();
+        }
+
+        // Random food position (aligned to square grid)
+        function spawnFood() {
+            food.x = Math.floor(Math.random() * GRID_SIZE);
+            food.y = Math.floor(Math.random() * GRID_SIZE);
+            foodSprite.position.set(food.x * CELL_SIZE + CELL_SIZE / 2, food.y * CELL_SIZE + CELL_SIZE / 2);
+        }
+
+        // Update snake graphics (circular segments)
+        function updateSnakeGraphics() {
+            snakeContainer.removeChildren();
+            snake.forEach((segment, index) => {
+                const segmentSprite = new PIXI.Graphics();
+                segmentSprite.beginFill(index === 0 ? 0x55ff55 : 0x33cc33+(index%2)*100);
+                segmentSprite.drawCircle(0, 0, CELL_SIZE / 2 - 2);
+                segmentSprite.endFill();
+
+                if (index === 0) {
+                    const angle = Math.atan2(velocity.y, velocity.x);
+                    const eyeRadius = CELL_SIZE / 6;
+                    const eyeOffset = CELL_SIZE / 3;
+                    segmentSprite.beginFill(0xffffff);
+                    segmentSprite.drawCircle(
+                        Math.cos(angle) * eyeOffset - Math.sin(angle) * eyeOffset,
+                        Math.sin(angle) * eyeOffset + Math.cos(angle) * eyeOffset,
+                        eyeRadius
+                    );
+                    segmentSprite.drawCircle(
+                        Math.cos(angle) * eyeOffset + Math.sin(angle) * eyeOffset,
+                        Math.sin(angle) * eyeOffset - Math.cos(angle) * eyeOffset,
+                        eyeRadius
+                    );
+                    segmentSprite.endFill();
+                    segmentSprite.beginFill(0x000000);
+                    segmentSprite.drawCircle(
+                        Math.cos(angle) * eyeOffset - Math.sin(angle) * eyeOffset,
+                        Math.sin(angle) * eyeOffset + Math.cos(angle) * eyeOffset,
+                        eyeRadius / 2
+                    );
+                    segmentSprite.drawCircle(
+                        Math.cos(angle) * eyeOffset + Math.sin(angle) * eyeOffset,
+                        Math.sin(angle) * eyeOffset - Math.cos(angle) * eyeOffset,
+                        eyeRadius / 2
+                    );
+                    segmentSprite.endFill();
+                }
+
+                segmentSprite.position.set(segment.x, segment.y);
+                snakeContainer.addChild(segmentSprite);
+            });
+        }
+
+        // Game loop
+        app.ticker.add((delta) => {
+            if (gameOver || gamePaused) return;
+
+            // Calculate direction
+            if (controlMode === 'mouse') {
+                const head = snake[0];
+                const dx = mousePosition.x - head.x;
+                const dy = mousePosition.y - head.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > 10) {
+                    targetDirection.x = dx / distance;
+                    targetDirection.y = dy / distance;
+                }
+            } else if (controlMode === 'keyboard') {
+                const magnitude = Math.sqrt(keyboardInput.x * keyboardInput.x + keyboardInput.y * keyboardInput.y);
+                if (magnitude > 0) {
+                    targetDirection.x = keyboardInput.x / magnitude;
+                    targetDirection.y = keyboardInput.y / magnitude;
+                } else {
+                    targetDirection.x = velocity.x;
+                    targetDirection.y = velocity.y;
+                }
+            } else if (controlMode === 'joystick') {
+                const magnitude = Math.sqrt(joystickInput.x * joystickInput.x + joystickInput.y * joystickInput.y);
+                if (magnitude > 0.2) {
+                    targetDirection.x = joystickInput.x / magnitude;
+                    targetDirection.y = joystickInput.y / magnitude;
+                } else {
+                    targetDirection.x = velocity.x;
+                    targetDirection.y = velocity.y;
+                }
+            }
+
+            // Smoothly interpolate velocity
+            velocity.x += (targetDirection.x - velocity.x) * TURN_SPEED;
+            velocity.y += (targetDirection.y - velocity.y) * TURN_SPEED;
+            const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+            if (speed > 0) {
+                velocity.x = (velocity.x / speed) * SNAKE_SPEED;
+                velocity.y = (velocity.y / speed) * SNAKE_SPEED;
+            }
+
+            // Move head
+            const head = snake[0];
+            head.x += velocity.x * delta;
+            head.y += velocity.y * delta;
+
+            // Check boundaries
+            if (head.x < 0 || head.x > app.view.width || head.y < 0 || head.y > app.view.height) {
+                gameOver = true;
+                statusText.text = 'Game Over!\nPress R to Restart\nPress S for Settings';
+                statusText.visible = true;
+                joystickContainer.style.display = 'none';
+                return;
+            }
+
+            // Update snake segments
+            for (let i = 1; i < snake.length; i++) {
+                const prev = snake[i - 1];
+                const curr = snake[i];
+                const dx = prev.x - curr.x;
+                const dy = prev.y - curr.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > SNAKE_SEGMENT_SPACING) {
+                    const factor = SNAKE_SEGMENT_SPACING / dist;
+                    curr.x = prev.x - dx * factor;
+                    curr.y = prev.y - dy * factor;
+                }
+            }
+
+            // Check self collision
+            for (let i = 4; i < snake.length; i++) {
+                const dx = head.x - snake[i].x;
+                const dy = head.y - snake[i].y;
+                if (Math.sqrt(dx * dx + dy * dy) < CELL_SIZE / 2) {
+                    gameOver = true;
+                    statusText.text = 'Game Over!\nPress R to Restart\nPress S for Settings';
+                    statusText.visible = true;
+                    joystickContainer.style.display = 'none';
+                    return;
+                }
+            }
+
+            // Check food collision
+            const foodCenterX = food.x * CELL_SIZE + CELL_SIZE / 2;
+            const foodCenterY = food.y * CELL_SIZE + CELL_SIZE / 2;
+            if (Math.abs(head.x - foodCenterX) < CELL_SIZE / 2 &&
+                Math.abs(head.y - foodCenterY) < CELL_SIZE / 2) {
+                score += 1;
+                scoreText.text = `Score: ${score} / ${winScore}`;
+                snake.push({ x: snake[snake.length - 1].x, y: snake[snake.length - 1].y });
+                spawnFood();
+                if (score >= winScore) {
+                    gameOver = true;
+                    statusText.text = 'You Win!\nPress R to Restart\nPress S for Settings';
+                    statusText.visible = true;
+                    joystickContainer.style.display = 'none';
+                }
+            }
+
+            // Limit snake length
+            if (snake.length > MAX_SEGMENTS) {
+                snake.pop();
+            }
+
+            updateSnakeGraphics();
+        });
+
+        // Initial setup
+        spawnFood();
+        updateSnakeGraphics();
+
+        // Resize canvas on window resize
+        window.addEventListener('resize', () => {
+            if (gamePaused || gameOver) return;
+            app.renderer.resize(Math.min(window.innerWidth - 40, 600), Math.min(window.innerHeight - 40, 600));
+            const newCellSize = app.view.width / GRID_SIZE;
+            const newHexHeight = newCellSize * Math.sqrt(3) / 2;
+            grid.clear();
+            grid.lineStyle(1, 0x666666);
+            for (let row = 0; row < GRID_SIZE; row++) {
+                for (let col = 0; col < GRID_SIZE; col++) {
+                    const x = col * newCellSize * 1.5 + (row % 2) * newCellSize * 0.75;
+                    const y = row * newHexHeight;
+                    drawHexagon(grid, x + newCellSize / 2, y + newHexHeight / 2, newCellSize / 2);
+                }
+            }
+            statusText.position.set(app.view.width / 2, app.view.height / 2);
+            scoreText.position.set(10, 10);
+        });
+    </script>
+</body>
+</html>
